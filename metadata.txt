@@ -1,0 +1,25 @@
+metadata {
+    name: "anton_webos"
+    description: "Anton Plugin for WebOS TVs"
+    remote_url: "https://github.com/HomeWeave/WebOS"
+}
+runtime {
+    runtime_type: PY3
+    py3_runtime_info {
+        main_service_class: "anton_webos.plugin.WebOSPlugin"
+        dependencies: "pywebostv"
+        dependencies: "getmac"
+    }
+    pipes {
+        pipe_id: "events"
+        pipe_type: IOT_EVENTS
+    }
+    pipes {
+        pipe_id: "instructions"
+        pipe_type: IOT_INSTRUCTION
+    }
+    pipes {
+        pipe_id: "query"
+        pipe_type: STATUS_QUERY
+    }
+}
