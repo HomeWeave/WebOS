@@ -56,15 +56,21 @@ class JSONConfig:
 
 
 class TVController(object):
-    def __init__(self, client, config, mac, send_event):
+    def __init__(self, client, config, mac, event_controller,
+                 instruction_controller):
         self.client = client
         self.config = config
         self.mac = mac
         self.status = ConnectionStatus.NOT_STARTED
-        self.send_event = send_event
+        self.event_controller = event_controller
+        self.instruction_controller = instruction_controller
         self.reg_data = None
+        self.controller_thread = Thread(target=self.run)
 
     def start(self):
+        self.controller_thread.start()
+
+    def run(self):
         self.client.connect()
         self.reg_data = self.config.get(self.mac) or {}
         if not self.reg_data:
@@ -74,10 +80,15 @@ class TVController(object):
             event = GenericEvent()
             disc = event.discovery
             disc.vendor_device_id=self.mac
-            disc.capabilities.device_registration_capabilities.total_steps = 2
+            disc.capabilities.device_registration_capabilities.greeting_text = (
+                    "LG TV found!")
             self.send_event(event)
         else:
             self.register_tv()
+
+    def stop(self):
+        self.client.close()
+        self.controller_thread.join()
 
     def register_tv(self):
         for status in self.client.register(self.reg_data):
@@ -92,22 +103,26 @@ class TVController(object):
                 self.config[self.mac] = self.reg_data
                 event = GenericEvent()
                 event.device_registration.success_text = "Successful!"
-                self.send_event(event)
+                self.event_controller.send(event)
 
     def execute_instruction(self, instruction):
         pass
 
 
 class TVDiscovery(object):
-    def __init__(self, config, send_event):
+    def __init__(self, config, event_controller, instruction_controller):
         self.discovery_lock = Lock()
         self.discovered_devices = {}
         self.config = config
-        self.send_event = send_event
-        self.discovery_thread = Thread(target=self.start)
+        self.event_controller = event_controller
+        self.instruction_controller = instruction_controller
+        self.discovery_thread = Thread(target=self.run)
         self.stop_event = Event()
 
     def start(self):
+        self.discovery_thread.start()
+
+    def run(self):
         first_iter = True
         while first_iter or not self.stop_event.wait(timeout=5 * 60):
             first_iter = False
@@ -117,35 +132,40 @@ class TVDiscovery(object):
                 if not clients:
                     log_info("No LG TVs found.")
                     continue
-                for client in WebOSClient.discover():
+                for client in clients:
                     mac = get_mac_address(hostname=client.host)
                     if mac in self.discovered_devices:
                         continue
 
                     log_info("Found a TV at: " + client.host)
-                    tv_controller= TVController(client, self.config, mac,
-                                                self.send_event)
+                    tv_controller = TVController(client, self.config, mac,
+                                                 self.event_controller,
+                                                 self.instruction_controller)
                     self.discovered_devices[mac] = tv_controller
                     tv_controller.start()
 
     def stop(self):
+        for mac, tv_controller in self.discovered_devices.items():
+            tv_controller.stop()
+
         self.stop_event.set()
+        self.discovery_thread.join()
 
 
 class WebOSPlugin(AntonPlugin):
     def setup(self, plugin_startup_info):
         config = JSONConfig(plugin_startup_info.data_dir + "/config.json")
-        registry = self.channel_registry()
+        registrar = self.channel_registrar()
 
-        event_controller = GenericEventController(self.reader())
-        registry.register_controller(PipeType.IOT_EVENTS, event_controller)
-        self.send_event = event_controller.send
+        event_controller = GenericEventController()
+        registrar.register_controller(PipeType.IOT_EVENTS, event_controller)
 
-        instruction_controller = GenericInstructionController(self.reader(), {})
-        registry.register_controller(PipeType.IOT_INSTRUCTION,
+        instruction_controller = GenericInstructionController({})
+        registrar.register_controller(PipeType.IOT_INSTRUCTION,
+                                      instruction_controller)
+
+        self.discovery = TVDiscovery(config, event_controller,
                                      instruction_controller)
-
-        self.discovery = TVDiscovery(config, self.send_event)
         log_info("WebOS Plugin setup complete.")
 
     def on_start(self):
@@ -153,5 +173,5 @@ class WebOSPlugin(AntonPlugin):
         self.discovery.start()
 
     def on_stop(self):
-        pass
+        self.discovery.stop()
 
