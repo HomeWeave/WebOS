@@ -9,6 +9,7 @@ runtime {
         main_service_class: "anton_webos.plugin.WebOSPlugin"
         dependencies: "pywebostv"
         dependencies: "getmac"
+        dependencies: "wakeonlan"
     }
     pipes {
         pipe_id: "events"
@@ -17,9 +18,5 @@ runtime {
     pipes {
         pipe_id: "instructions"
         pipe_type: IOT_INSTRUCTION
-    }
-    pipes {
-        pipe_id: "query"
-        pipe_type: STATUS_QUERY
     }
 }
