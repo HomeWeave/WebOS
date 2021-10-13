@@ -16,7 +16,7 @@ from anton.power_pb2 import POWER_OFF, POWER_ON
 from anton.capabilities_pb2 import Capabilities
 
 from pywebostv.connection import WebOSClient
-from pywebostv.controls import SystemControl
+from pywebostv.controls import SystemControl, ApplicationControl
 from getmac import get_mac_address
 from wakeonlan import send_magic_packet
 
@@ -63,6 +63,8 @@ class TVController(object):
         self.reg_data = None
         self.register_tv_thread = Thread(target=self.register_tv)
 
+        self.app_control = ApplicationControl(client)
+
     def start(self):
         self.client.connect()
         self.reg_data = self.config.get(self.mac) or {}
@@ -105,7 +107,33 @@ class TVController(object):
                 notification = capabilities.notifications
                 notification.simple_text_notification_supported = True
 
+                apps_capabilities = capabilities.apps
+                apps_capabilities.can_switch_apps = True
+                apps_capabilities.has_installed_apps = True
+
                 self.send_event(event)
+
+                # send apps list.
+                event = GenericEvent(device_id=self.mac)
+                apps_state = event.apps.apps_state
+
+                for app in self.app_control.list_apps():
+                    app_msg = apps_state.installed_apps.add()
+                    app_msg.app_name = app["title"]
+                    app_msg.app_id = app["id"]
+                    app_msg.app_icon_url = app["icon"]
+
+                apps_state.foreground_app_id = self.app_control.get_current()
+                self.send_event(event)
+
+                # Subscribe to events
+                self.app_control.subscribe_get_current(self.on_app_change)
+
+    def on_app_change(self, success, app_id):
+        event = GenericEvent(device_id=self.mac)
+        event.apps.foreground_app.app_id = app_id
+
+        self.send_event(event)
 
     def on_device_instruction(self, instruction):
         if instruction.device.device_registration_instruction.execute_step == 1:
