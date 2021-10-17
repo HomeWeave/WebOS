@@ -148,7 +148,7 @@ class TVController(object):
         elif power_instruction == POWER_ON:
             send_magic_packet(self.mac)
 
-        event = GenericEvent(device_id=light.unique_id)
+        event = GenericEvent(device_id=self.mac)
         event.power_state.power_state = power_instruction
         self.send_event(event)
 
