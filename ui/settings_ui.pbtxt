@@ -1,0 +1,243 @@
+/*
+*/
+root {
+  scroll_layout {
+    containers {
+      id: "txtLoadingDevices"
+      text {
+        text: "Loading devices.."
+      }
+      replacement_target: "devices_section"
+    }
+  }
+}
+onload_actions_list {
+  actions {
+    action_id: "get_known_devices"
+  }
+}
+subscriptions {
+  type: INBOUND_CUSTOM_MESSAGE
+  actions_list {
+    actions {
+      parse_action {
+        string_to_json: true
+      }
+    }
+    actions {
+      debug {
+        context_id: "."
+        tag: "incoming message"
+      }
+    }
+    actions {
+      action_id: "handle_known_devices"
+      conditional {
+        jq_conditional: ".[\"$result\"].type == \"known_devices\""
+      }
+    }
+  }
+}
+configured_actions {
+  key: "trigger_registration"
+  value {
+    actions {
+      action_id: "send_data"
+      additional_context {
+        key: "payload"
+        value: "{ 'action': 'register' }"
+      }
+    }
+  }
+}
+configured_actions {
+  key: "trigger_discovery"
+  value {
+    actions {
+      action_id: "send_data"
+      additional_context {
+        key: "payload"
+        value: "{ 'action': 'discover' }"
+      }
+    }
+  }
+}
+configured_actions {
+  key: "send_data"
+  value {
+    actions {
+      apply_template_to_context_action {
+        template: "{{ payload }}"
+      }
+    }
+    actions {
+      parse_action {
+        string_to_json: true
+      }
+    }
+    actions {
+      serialize_action {
+        json: true
+      }
+    }
+    actions {
+      server_action {
+        channel_type: OUTBOUND_CUSTOM_MESSAGE
+      }
+    }
+  }
+}
+configured_actions {
+  key: "get_known_devices"
+  value {
+    actions {
+      action_id: "send_data"
+      additional_context {
+        key: "payload"
+        value: "{ 'action': 'get_known_devices' }"
+      }
+    }
+  }
+}
+configured_actions {
+  key: "handle_known_devices"
+  value {
+    actions {
+      debug {
+        context_id: "."
+      }
+    }
+    actions {
+      jq_action {
+        transform_expression: ".settings"
+      }
+    }
+    actions {
+      store_to_global_context_action {
+        target_id: "latest_settings"
+      }
+    }
+    actions {
+      action_id: "load_template_container"
+      additional_context {
+        key: "resource_id"
+        value: "ui/devices_ui.pbtxt.template"
+      }
+      additional_context {
+        key: "replacement_target"
+        value: "devices_section"
+      }
+    }
+  }
+}
+configured_actions {
+  key: "handle_bridge_change"
+  value {
+    actions {
+      debug {
+        context_id: "."
+        tag: "handle_bridge_change debug"
+      }
+    }
+    actions {
+      jq_action {
+        transform_expression: ".bridge"
+      }
+    }
+    actions {
+      store_to_global_context_action {
+        target_id: "bridge"
+      }
+    }
+    actions {
+      action_id: "load_template_container"
+      additional_context {
+        key: "resource_id"
+        value: "ui/bridge.pbtxt.template"
+      }
+      additional_context {
+        key: "replacement_target"
+        value: "bridge_section"
+      }
+    }
+  }
+}
+configured_actions {
+  key: "load_template_container"
+  value {
+    actions {
+      load_resource_action {
+        resource_id: "{{resource_id}}"
+      }
+    }
+    actions {
+      apply_template_to_context_action {}
+    }
+    actions {
+      debug {
+        tag: "template test"
+        context_id: "."
+      }
+    }
+    actions {
+      parse_action {
+        parse_text_proto_type: "anton.ui.Container"
+      }
+    }
+    actions {
+      container_action {
+        bus_key: "{{ replacement_target }}"
+      }
+    }
+  }
+}
+configured_actions {
+  key: "update_container"
+  value {
+    actions {
+      apply_template_to_context_action {
+        template: "{{ payload }}"
+      }
+    }
+    actions {
+      parse_action {
+        string_to_json: true
+      }
+    }
+    actions {
+      parse_action {
+        parse_json_proto_type: "anton.ui.Container"
+      }
+    }
+    actions {
+      container_action {
+        bus_key: "{{replacementTarget}}"
+        operation_type: kContainerMerge
+      }
+    }
+  }
+}
+configured_actions {
+  key: "hide_container"
+  value {
+    actions {
+      action_id: "update_container"
+      additional_context {
+        key: "payload"
+        value: "{'options': {'hide': true }}"
+      }
+    }
+  }
+}
+configured_actions {
+  key: "show_container"
+  value {
+    actions {
+      action_id: "update_container"
+      additional_context {
+        key: "payload"
+        value: "{'options': {'hide': false }}"
+      }
+    }
+  }
+}

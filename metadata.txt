@@ -7,16 +7,12 @@ runtime {
     runtime_type: PY3
     py3_runtime_info {
         main_service_class: "anton_webos.plugin.WebOSPlugin"
-        dependencies: "pywebostv"
+        dependencies: "git+https://github.com/supersaiyanmode/pywebostv.git"
         dependencies: "getmac"
         dependencies: "wakeonlan"
     }
     pipes {
-        pipe_id: "events"
-        pipe_type: IOT_EVENTS
+        pipe_type: DEFAULT
     }
-    pipes {
-        pipe_id: "instructions"
-        pipe_type: IOT_INSTRUCTION
-    }
+    data_files: "ui"
 }
