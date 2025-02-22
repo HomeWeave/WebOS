@@ -12,6 +12,7 @@ class TVController(object):
     def __init__(self, client, config, mac, send_event,
                  instruction_controller):
         self.client = client
+        self.host = client.host
         self.config = config
         self.mac = mac
         self.send_event = send_event
@@ -22,7 +23,6 @@ class TVController(object):
         self.app_control = ApplicationControl(client)
 
     def start(self):
-        self.client.connect()
         self.reg_data = self.config.get(self.mac) or {}
         if not self.reg_data:
             # If not registered, send event with registration capability.
@@ -115,8 +115,7 @@ class DevicesController(DeviceHandlerBase):
     def __init__(self, settings):
         super().__init__()
         self.settings = settings
-        self.registration_controller = WebOsRegistrationController(
-            settings, self.handle_registration_callback)
+        self.registration_controller = WebOsRegistrationController(settings)
         self.devices = {}
         # Will be set outside of this class.
         self.app_handler = None
@@ -133,10 +132,40 @@ class DevicesController(DeviceHandlerBase):
         self.connect_thread.join()
         self.registration_controller.stop()
 
+    def send_all_devices(self, requester_id, _=None):
+
+        def make_status(info):
+            if info["is_online"] and info["is_registered"]:
+                return "Connected"
+            elif info["is_online"] and not info["is_registered"]:
+                return "Online, unregistered"
+            elif not info["is_online"]:
+                return "Offline"
+            else:
+                return "Unknown"
+
+        def make_info(info):
+            return dict(status=make_status(info),
+                        **{
+                            x: y
+                            for x, y in info.items() if x != 'conn'
+                        })
+
+        resp = {
+            "type":
+            "devices",
+            "devices": [
+                make_info(info) for info in
+                self.registration_controller.get_all_devices().values()
+            ]
+        }
+        self.app_handler.send_message(resp, requester_id=requester_id)
+
     def background_connect(self):
         while True:
-            self.registration_controller.register_all()
-            if self.connect_thread_stop.wait(timeout=60):
+            self.registration_controller.register_known_devices(
+                lambda: self.on_device_status_changed(None))
+            if self.connect_thread_stop.wait(timeout=120):
                 break
 
     def set_app_handler(self, app_handler):
@@ -145,12 +174,19 @@ class DevicesController(DeviceHandlerBase):
     def discover(self):
         self.registration_controller.discover()
 
-    def handle_registration_callback(self, obj):
-        if "registration_status" in obj:
-            conn = obj["registration_status"].pop('conn')
-            self.devices[obj["device_id"]] = conn
+    def register_device(self, requester_id, request):
+        self.registration_controller.register(
+            request.get('device_id'),
+            lambda: self.on_device_status_changed(requester_id))
 
-        self.app_handler.send_message(obj, requester_id=None)
+    def on_device_status_changed(self, requester_id=None):
+        for did, info in self.registration_controller.get_all_devices():
+            if info.get('is_registered', False) and did not in self.devices:
+                self.devices[did] = WebOSController(info['conn'], self)
+                log_info("Connected to WebOS TV at: " + conn.host)
+
+        if requester_id:
+            self.send_all_devices(requester_id=requester_id)
 
     def handle_set_device_state(self, msg, responder):
         pass

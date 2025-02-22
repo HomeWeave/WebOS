@@ -1,4 +1,5 @@
 /*
+import: ui/devices_ui.pbtxt.template
 */
 root {
   scroll_layout {
@@ -13,7 +14,7 @@ root {
 }
 onload_actions_list {
   actions {
-    action_id: "get_known_devices"
+    action_id: "get_all_devices"
   }
 }
 subscriptions {
@@ -31,9 +32,9 @@ subscriptions {
       }
     }
     actions {
-      action_id: "handle_known_devices"
+      action_id: "handle_devices_list"
       conditional {
-        jq_conditional: ".[\"$result\"].type == \"known_devices\""
+        jq_conditional: ".[\"$result\"].type == \"devices\""
       }
     }
   }
@@ -88,33 +89,28 @@ configured_actions {
   }
 }
 configured_actions {
-  key: "get_known_devices"
+  key: "get_all_devices"
   value {
     actions {
       action_id: "send_data"
       additional_context {
         key: "payload"
-        value: "{ 'action': 'get_known_devices' }"
+        value: "{ 'action': 'get_all_devices' }"
       }
     }
   }
 }
 configured_actions {
-  key: "handle_known_devices"
+  key: "handle_devices_list"
   value {
     actions {
-      debug {
-        context_id: "."
-      }
-    }
-    actions {
       jq_action {
-        transform_expression: ".settings"
+        transform_expression: ".devices"
       }
     }
     actions {
       store_to_global_context_action {
-        target_id: "latest_settings"
+        target_id: "all_devices"
       }
     }
     actions {
@@ -131,53 +127,15 @@ configured_actions {
   }
 }
 configured_actions {
-  key: "handle_bridge_change"
-  value {
-    actions {
-      debug {
-        context_id: "."
-        tag: "handle_bridge_change debug"
-      }
-    }
-    actions {
-      jq_action {
-        transform_expression: ".bridge"
-      }
-    }
-    actions {
-      store_to_global_context_action {
-        target_id: "bridge"
-      }
-    }
-    actions {
-      action_id: "load_template_container"
-      additional_context {
-        key: "resource_id"
-        value: "ui/bridge.pbtxt.template"
-      }
-      additional_context {
-        key: "replacement_target"
-        value: "bridge_section"
-      }
-    }
-  }
-}
-configured_actions {
   key: "load_template_container"
   value {
     actions {
       load_resource_action {
-        resource_id: "{{resource_id}}"
+        resource_id: "{{ resource_id }}"
       }
     }
     actions {
       apply_template_to_context_action {}
-    }
-    actions {
-      debug {
-        tag: "template test"
-        context_id: "."
-      }
     }
     actions {
       parse_action {

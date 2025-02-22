@@ -8,46 +8,45 @@ from getmac import get_mac_address
 
 class WebOsRegistrationController:
 
-    def __init__(self, settings, callback):
+    def __init__(self, settings):
         self.settings = settings
-        self.callback = callback
-        self.conns = {}
+
+        known_devices = self.settings.get_prop('known_devices', default=[])
+        self.conns = {x: {"id": x, "is_online": False} for x in known_devices}
 
     def start_discovery(self):
         Thread(target=self.discover).start()
 
     def discover(self):
-        self.callback({"discovery_status": "discovering"})
-
         log_info("Discovering WebOS devices..")
         clients = WebOSClient.discover()
         if not clients:
             log_info("No LG TVs found.")
-            self.callback({"discovery_status": "not found"})
             return
+        else:
+            log_info(f"Found {len(clients)} clients.")
 
-        self.conns = {
-            get_mac_address(client.host): {
+        for client in clients:
+            did = get_mac_address(hostname=client.host)
+            self.conns[did] = {
+                "id": did,
                 "conn": client,
                 "host": client.host,
+                "is_online": True,
+                "is_registered": False
             }
-            for client in clients
-        }
-        self.callback({
-            "discovery_status":
-            "found",
-            "devices": [
-                dict(id=did, host=data["host"])
-                for did, host in self.conn.items()
-            ]
-        })
 
-    def register_all(self):
+    def get_all_devices(self):
+        return self.conns
+
+    def register_known_devices(self, callback):
         self.discover()
+        known_devices = self.settings.get_prop('known_devices', default=[])
         for device_id in self.conns:
-            self.register(device_id)
+            if device_id in known_devices:
+                self.register(device_id, callback)
 
-    def register(self, device_id):
+    def register(self, device_id, callback):
         if device_id not in self.conns:
             raise ResourceNotFound(device_id)
 
@@ -61,32 +60,29 @@ class WebOsRegistrationController:
 
         Thread(target=self.process_registration,
                args=(device_id, data, store, device_config, config,
-                     registration_generator)).start()
+                     registration_generator, callback)).start()
 
     def process_registration(self, device_id, data, store, device_config,
-                             config, registration_generator):
+                             config, registration_generator, callback):
         try:
             for status in registration_generator:
                 if status == WebOSClient.PROMPTED:
-                    self.callback({
-                        "registration_status": "prompted",
-                        "device_id": device_id
-                    })
+                    self.conns[device_id]["status"] = "Registration initiated."
+                    callback()
                 elif status == WebOSClient.REGISTERED:
                     device_config['login'] = data["store"]
                     config[device_id] = device_config
                     self.settings.set_prop("devices", config)
 
-                    self.callback({
-                        "registration_status": "registered",
-                        "conn": data["conn"],
-                        "device_id": device_id
-                    })
+                    known_devices = self.settings.get_prop('known_devices',
+                                                           default=[])
+                    known_devices = list(set(known_devices) | {device_id})
+                    self.settings.set_prop('known_devices', known_devices)
+
+                    self.conns[device_id]["status"] = "Connected."
+                    callback()
         except Exception as e:
-            self.callback({
-                "registration_status": "failed",
-                "device_id": device_id
-            })
+            callback({"registration_status": "failed", "device_id": device_id})
             raise AntonInternalError("Unable to register: " + str(e))
 
     def stop(self):

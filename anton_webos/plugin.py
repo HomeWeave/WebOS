@@ -36,6 +36,10 @@ class AppHandler(AppHandlerBase):
         self.register_action(
             'discover',
             lambda requester_id, _: self.devices_controller.start_discovery)
+        self.register_action('get_all_devices',
+                             self.devices_controller.send_all_devices)
+        self.register_action('register',
+                             self.devices_controller.register_device)
 
     def get_ui_path(self, app_type):
         if app_type == DynamicAppRequestType.SETTINGS:

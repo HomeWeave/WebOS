@@ -1,0 +1,41 @@
+scroll_layout {
+  containers {
+    text: {
+      text: ""
+    }
+  }
+  {% for device in all_devices %}
+    containers {
+      grid_layout {
+        containers {
+          id: "device-{{ device.host }}-name"
+          text {
+            text: "{{ device.host }}"
+          }
+        }
+        containers {
+          id: "device-{{ device.host }}-status"
+          text {
+            text: "{{ device.status }}"
+          }
+        }
+        containers {
+          button {
+            text: "Register"
+          }
+        }
+        params { xl: 8 lg: 8  }
+        params { xl: 3 lg: 3 }
+        params { xl: 1 lg: 1 }
+      }
+    }
+  {% endfor %}
+  {% if all_devices.length == 0 %}
+    containers {
+      id: "title_prompt_configure"
+      text {
+        text: "No WebOS devices online."
+      }
+    }
+  {% endif %}
+}
