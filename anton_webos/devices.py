@@ -1,46 +1,108 @@
 from threading import Thread, Event
 
 from anton.capabilities_pb2 import Capabilities
+from anton.power_pb2 import PowerState
+from anton.state_pb2 import DeviceState
+from anton.device_pb2 import DeviceKind, DeviceStatus
 
 from pyantonlib.channel import DeviceHandlerBase
+from pyantonlib.utils import log_info
 
 from anton_webos.registration import WebOsRegistrationController
 
+from pywebostv.controls import (ApplicationControl, MediaControl,
+                                SystemControl, InputControl, TvControl,
+                                SourceControl)
 
-class TVController(object):
 
-    def __init__(self, client, config, mac, send_event,
-                 instruction_controller):
+class BaseController:
+
+    def __init__(self, client, devices_controller, client_info):
         self.client = client
-        self.host = client.host
-        self.config = config
-        self.mac = mac
-        self.send_event = send_event
-        self.instruction_controller = instruction_controller
-        self.reg_data = None
-        self.register_tv_thread = Thread(target=self.register_tv)
+        self.devices_controller = devices_controller
+        self.client_info = client_info
 
+    def on_start(self, capabilities):
+        pass
+
+    def on_stop(self):
+        pass
+
+
+class ApplicationController(BaseController):
+
+    def __init__(self, client, devices_controller, client_info):
+        super().__init__(client, devices_controller, client_info)
         self.app_control = ApplicationControl(client)
 
-    def start(self):
-        self.reg_data = self.config.get(self.mac) or {}
-        if not self.reg_data:
-            # If not registered, send event with registration capability.
-            event = GenericEvent(device_id=self.mac)
-            event.device.friendly_name = "LG TV"
-            event.device.device_kind = DEVICE_KIND_TV
-            event.device.device_status = DEVICE_STATUS_UNREGISTERED
+    def on_start(self, state, capabilities):
+        apps_capabilities = capabilities.apps
+        apps_capabilities.can_switch_apps = True
+        apps_capabilities.has_installed_apps = True
 
-            capabilities = event.device.capabilities
-            capabilities.device_registration_capabilities.greeting_text = (
-                "Web OS TV discovered.")
-            capabilities.device_registration_capabilities.action_text = (
-                "Register")
-            self.send_event(event)
-        else:
-            self.register_tv()
+        for app in self.app_control.list_apps():
+            app_msg = state.installed_apps.add()
+            app_msg.app_name = app["title"]
+            app_msg.app_id = app["id"]
+            app_msg.app_icon_url = app["icon"]
+
+        state.foreground_app_id = self.app_control.get_current()
+
+        self.app_control.subscribe_get_current(self.on_foreground_app_change)
+
+    def on_stop(self):
+        self.app_control.unsubscribe_get_current()
+
+    def on_foreground_app_change(self, success, app_id):
+        if success:
+            self.devices_controller.send_device_state_updated(
+                DeviceState(device_id=self.client_info['id'],
+                            foreground_app_id=app_id))
+
+
+class SystemController(BaseController):
+
+    def __init__(self, client, devices_controller, client_info):
+        super().__init__(client, devices_controller, client_info)
+        self.system_control = SystemControl(client)
+
+    def on_start(self, state, capabilities):
+        capabilities.power_state.supported_power_states[:] = [
+            PowerState.POWER_STATE_OFF, PowerState.POWER_STATE_ON
+        ]
+        capabilities.notifications.simple_text_notification_supported = True
+
+        state.power_state = PowerState.POWER_STATE_ON
+
+
+class WebOSController(object):
+
+    def __init__(self, client, devices_controller, client_info):
+        self.client = client
+        self.devices_controller = devices_controller
+        self.client_info = client_info
+
+        self.app_control = ApplicationController(client, devices_controller,
+                                                 client_info)
+        self.system_control = SystemController(client, devices_controller,
+                                               client_info)
+        self.all_controls = [self.app_control, self.system_control]
+
+    def start(self):
+        state = DeviceState(
+            device_id=self.client_info['id'],
+            friendly_name=self.system_control.system_control.info()
+            ["product_name"],
+            kind=DeviceKind.DEVICE_KIND_TV,
+            device_status=DeviceStatus.DEVICE_STATUS_ONLINE)
+        for control in self.all_controls:
+            control.on_start(state, state.capabilities)
+
+        self.devices_controller.send_device_state_updated(state)
 
     def stop(self):
+        for control in self.all_controls:
+            control.on_stop()
         self.client.close()
 
     def on_app_change(self, success, app_id):
