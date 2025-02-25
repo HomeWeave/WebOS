@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-DEFAULT = {"devices": []}
+DEFAULT = {}
 
 
 def write_settings(path, settings):

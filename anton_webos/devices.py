@@ -43,49 +43,6 @@ class TVController(object):
     def stop(self):
         self.client.close()
 
-    def register_tv(self):
-        for status in self.client.register(self.reg_data):
-            if status == WebOSClient.PROMPTED:
-                # TODO: Think about timeout (Prompt expiry)
-                event = GenericEvent(device_id=self.mac)
-                capabilities = event.device.capabilities
-                capabilities.device_registration_capabilities.greeting_text = (
-                    "Please accept the prompt on the TV.")
-                self.send_event(event)
-            elif status == WebOSClient.REGISTERED:
-                self.config[self.mac] = self.reg_data
-                event = GenericEvent(device_id=self.mac)
-                event.device.device_kind = DEVICE_KIND_TV
-                event.device.device_status = DEVICE_STATUS_ONLINE
-                capabilities = event.device.capabilities
-                capabilities.power_state.supported_power_states[:] = [
-                    POWER_OFF, POWER_ON
-                ]
-                notification = capabilities.notifications
-                notification.simple_text_notification_supported = True
-
-                apps_capabilities = capabilities.apps
-                apps_capabilities.can_switch_apps = True
-                apps_capabilities.has_installed_apps = True
-
-                self.send_event(event)
-
-                # send apps list.
-                event = GenericEvent(device_id=self.mac)
-                apps_state = event.apps.apps_state
-
-                for app in self.app_control.list_apps():
-                    app_msg = apps_state.installed_apps.add()
-                    app_msg.app_name = app["title"]
-                    app_msg.app_id = app["id"]
-                    app_msg.app_icon_url = app["icon"]
-
-                apps_state.foreground_app_id = self.app_control.get_current()
-                self.send_event(event)
-
-                # Subscribe to events
-                self.app_control.subscribe_get_current(self.on_app_change)
-
     def on_app_change(self, success, app_id):
         event = GenericEvent(device_id=self.mac)
         event.apps.foreground_app.app_id = app_id
@@ -145,10 +102,11 @@ class DevicesController(DeviceHandlerBase):
                 return "Unknown"
 
         def make_info(info):
-            return dict(status=make_status(info),
+            return dict(status=info.get('status', make_status(info)),
                         **{
                             x: y
-                            for x, y in info.items() if x != 'conn'
+                            for x, y in info.items()
+                            if x not in ('conn', 'status')
                         })
 
         resp = {
@@ -164,8 +122,8 @@ class DevicesController(DeviceHandlerBase):
     def background_connect(self):
         while True:
             self.registration_controller.register_known_devices(
-                lambda: self.on_device_status_changed(None))
-            if self.connect_thread_stop.wait(timeout=120):
+                lambda device_info: self.on_device_status_changed(device_info))
+            if self.connect_thread_stop.wait(timeout=20):
                 break
 
     def set_app_handler(self, app_handler):
@@ -177,13 +135,16 @@ class DevicesController(DeviceHandlerBase):
     def register_device(self, requester_id, request):
         self.registration_controller.register(
             request.get('device_id'),
-            lambda: self.on_device_status_changed(requester_id))
+            lambda device_info: self.on_device_status_changed(
+                device_info, requester_id))
 
-    def on_device_status_changed(self, requester_id=None):
-        for did, info in self.registration_controller.get_all_devices():
-            if info.get('is_registered', False) and did not in self.devices:
-                self.devices[did] = WebOSController(info['conn'], self)
-                log_info("Connected to WebOS TV at: " + conn.host)
+    def on_device_status_changed(self, device_info, requester_id=None):
+        device_id = device_info['id']
+        if device_info['is_registered'] and device_id not in self.devices:
+            self.devices[device_id] = WebOSController(device_info['conn'],
+                                                      self, device_info)
+            log_info("Connected to WebOS TV at: " + device_info['conn'].host)
+            self.devices[device_id].start()
 
         if requester_id:
             self.send_all_devices(requester_id=requester_id)

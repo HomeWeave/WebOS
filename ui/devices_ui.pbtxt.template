@@ -1,11 +1,13 @@
 scroll_layout {
   containers {
+    id: "dummy-container"
     text: {
       text: ""
     }
   }
   {% for device in all_devices %}
     containers {
+      id: "device-{{ device.host }}-container"
       grid_layout {
         containers {
           id: "device-{{ device.host }}-name"
@@ -20,8 +22,22 @@ scroll_layout {
           }
         }
         containers {
+          id: "device-{{ device.host }}-register-button"
           button {
             text: "Register"
+            on_click {
+              actions {
+                action_id: "debug"
+                tag: "Registering device"
+                context: "."
+              }
+              actions {
+                action_id: "send_data"
+                additional_context {
+                  payload: "{ \'action\': \'register\', \'device_id\': \'{{ device.id}}\'}"
+                }
+              }
+            }
           }
         }
         params { xl: 8 lg: 8  }
