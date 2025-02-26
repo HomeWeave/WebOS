@@ -6,13 +6,14 @@ from anton.state_pb2 import DeviceState
 from anton.device_pb2 import DeviceKind, DeviceStatus
 
 from pyantonlib.channel import DeviceHandlerBase
-from pyantonlib.utils import log_info
+from pyantonlib.utils import log_info, log_warn
 
 from anton_webos.registration import WebOsRegistrationController
 
 from pywebostv.controls import (ApplicationControl, MediaControl,
                                 SystemControl, InputControl, TvControl,
                                 SourceControl)
+from wakeonlan import send_magic_packet
 
 
 class BaseController:
@@ -26,6 +27,9 @@ class BaseController:
         pass
 
     def on_stop(self):
+        pass
+
+    def handle_set_device_state(self, msg, responder):
         pass
 
 
@@ -74,6 +78,33 @@ class SystemController(BaseController):
 
         state.power_state = PowerState.POWER_STATE_ON
 
+    def handle_set_device_state(self, msg, responder):
+        if msg.power_state == PowerState.POWER_STATE_OFF:
+            log_info("Turning off TV.")
+            self.system_control.power_off()
+
+
+class PowerOffWebOSController(object):
+
+    def __init__(self, device_id, devices_controller):
+        self.device_id = device_id
+        self.devices_controller = devices_controller
+
+    def start(self):
+        state = DeviceState(device_id=self.device_id,
+                            friendly_name="Offline WebOS device",
+                            kind=DeviceKind.DEVICE_KIND_TV,
+                            power_state=PowerState.POWER_STATE_OFF,
+                            device_status=DeviceStatus.DEVICE_STATUS_ONLINE)
+        state.capabilities.power_state.supported_power_states[:] = [
+            PowerState.POWER_STATE_ON, PowerState.POWER_STATE_OFF
+        ]
+        self.devices_controller.send_device_state_updated(state)
+
+    def handle_set_device_state(self, msg, responder):
+        if msg.power_state == PowerState.POWER_STATE_ON:
+            send_magic_packet(self.device_id)
+
 
 class WebOSController(object):
 
@@ -102,31 +133,21 @@ class WebOSController(object):
 
     def stop(self):
         for control in self.all_controls:
-            control.on_stop()
+            try:
+                control.on_stop()
+            except Exception as e:
+                log_warn("Ignoring: ", e)
+                pass
         self.client.close()
 
-    def on_app_change(self, success, app_id):
-        event = GenericEvent(device_id=self.mac)
-        event.apps.foreground_app.app_id = app_id
+        state = DeviceState(device_id=self.client_info['id'],
+                            device_status=DeviceStatus.DEVICE_STATUS_ONLINE,
+                            power_state=PowerState.POWER_STATE_OFF)
+        self.devices_controller.send_device_state_updated(state)
 
-        self.send_event(event)
-
-    def on_device_instruction(self, instruction):
-        if instruction.device.device_registration_instruction.execute_step == 1:
-            self.register_tv_thread.start()
-
-    def on_power_instruction(self, instruction):
-        power_instruction = instruction.power_state
-
-        if power_instruction == POWER_OFF:
-            system = SystemControl(self.client)
-            system.power_off()
-        elif power_instruction == POWER_ON:
-            send_magic_packet(self.mac)
-
-        event = GenericEvent(device_id=self.mac)
-        event.power_state.power_state = power_instruction
-        self.send_event(event)
+    def handle_set_device_state(self, msg, responder):
+        for controller in self.all_controls:
+            controller.handle_set_device_state(msg, responder)
 
 
 class DevicesController(DeviceHandlerBase):
@@ -202,14 +223,33 @@ class DevicesController(DeviceHandlerBase):
 
     def on_device_status_changed(self, device_info, requester_id=None):
         device_id = device_info['id']
-        if device_info['is_registered'] and device_id not in self.devices:
-            self.devices[device_id] = WebOSController(device_info['conn'],
-                                                      self, device_info)
-            log_info("Connected to WebOS TV at: " + device_info['conn'].host)
-            self.devices[device_id].start()
+        if not device_info['is_registered']:
+            return
+
+        device = self.devices.get(device_id)
+        if device_info['is_connected']:
+            if not isinstance(device, WebOSController):
+                conn = device_info['conn']
+                self.devices[device_id] = WebOSController(
+                    conn, self, device_info)
+                self.devices[device_id].start()
+                log_info("Connected to WebOS TV at: " +
+                         device_info['conn'].host)
+        else:
+            if not isinstance(device, PowerOffWebOSController):
+                if isinstance(device, WebOSController):
+                    device.stop()
+                self.devices[device_id] = PowerOffWebOSController(
+                    device_id, self)
+                self.devices[device_id].start()
 
         if requester_id:
             self.send_all_devices(requester_id=requester_id)
 
     def handle_set_device_state(self, msg, responder):
-        pass
+        log_info("Handling set_device_state: " + str(msg))
+        device = self.devices.get(msg.device_id)
+        if device is None:
+            raise ResourceNotFound(msg.device_id)
+
+        device.handle_set_device_state(msg, responder)

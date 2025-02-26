@@ -35,20 +35,18 @@ class WebOsRegistrationController:
             value["is_connected"] = False
             self.conns[key] = value
 
-    def start_discovery(self):
-        Thread(target=self.discover).start()
-
-    def discover(self):
+    def discover(self, offline_callback=None):
         log_info("Discovering WebOS devices..")
         clients = WebOSClient.discover(secure=True)
         if not clients:
             log_info("No LG TVs found.")
-            return
         else:
             log_info(f"Found {len(clients)} clients.")
 
+        discovered_device_ids = set()
         for client in clients:
             did = get_mac_address(hostname=client.host)
+            discovered_device_ids.add(did)
             if did in self.conns:
                 self.conns[did].update({
                     "conn": client,
@@ -67,11 +65,23 @@ class WebOsRegistrationController:
             })
             log_info(f"Discovered a new device: {self.conns[did]}")
 
+        for key, cur_conn in self.conns.items():
+            if key not in discovered_device_ids and cur_conn['is_connected']:
+                cur_conn['is_connected'] = False
+                log_info(f"Existing device is now offline: {cur_conn}")
+                if offline_callback:
+                    offline_callback(cur_conn)
+
     def get_all_devices(self):
         return self.conns
 
     def register_known_devices(self, callback):
-        self.discover()
+        # For devices from the config file, devices.py will start up a
+        # PowerOffWebOSController.
+        for device_id, device_info in self.conns.items():
+            callback(device_info)
+
+        self.discover(offline_callback=callback)
         for device_id, device_info in self.conns.items():
             if (device_info['is_registered'] and device_info['is_online']
                     and not device_info['is_connected']):
