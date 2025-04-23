@@ -55,14 +55,14 @@ class WebOsRegistrationController:
                 })
                 continue
 
-            self.conns[did].update({
+            self.conns[did] = {
                 "id": did,
                 "conn": client,
                 "host": client.host,
                 "is_online": True,
                 "is_registered": False,
                 "store": {}
-            })
+            }
             log_info(f"Discovered a new device: {self.conns[did]}")
 
         for key, cur_conn in self.conns.items():
