@@ -126,4 +126,3 @@ class WebOsRegistrationController:
     def stop(self):
         for client in self.conns:
             client["conn"].close()
-        self.discovery_thread.join()
