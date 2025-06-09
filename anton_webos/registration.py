@@ -92,7 +92,7 @@ class WebOsRegistrationController:
             raise ResourceNotFound(device_id)
 
         Thread(target=self.process_registration,
-               args=(device_id, device_id, callback)).start()
+               args=(device_id, callback)).start()
 
     def process_registration(self, device_id, callback):
         device_info = self.conns[device_id]
